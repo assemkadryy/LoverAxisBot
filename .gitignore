@@ -1,0 +1,4 @@
+.env
+subscriptions.db
+__pycache__/
+*.pyc
