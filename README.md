@@ -1,6 +1,6 @@
 # 🤖 Telegram Subscription Bot
 
-> A production-ready Telegram bot for managing premium group subscriptions with automated Stripe payment handling, invite link generation, and subscription lifecycle management.
+> A production-ready Telegram bot for managing premium group subscriptions with fully automated Stripe payment processing, invite link generation, and subscription lifecycle management.
 
 ---
 
@@ -8,13 +8,16 @@
 
 | Feature | Description |
 |---------|-------------|
-| 💳 **Stripe Payments** | Fixed payment links for seamless checkout |
-| 📅 **Flexible Plans** | Monthly (30 days) and two-week (14 days) options |
-| 🔗 **Auto Invite Links** | Single-use group invite links sent after confirmation |
+| 💳 **Stripe API Integration** | Dynamic checkout sessions created per user via Stripe API |
+| 🔐 **Secure Payments** | Each user gets a unique payment link tied to their Telegram ID |
+| 📦 **Product Catalog Linked** | Every transaction is linked to your Stripe product catalog |
+| 📅 **Flexible Plans** | Monthly (30 days) and two-week (14 days) subscriptions |
+| ⚡ **Fully Automatic** | Invite link sent instantly after payment — zero manual work |
+| 🔗 **Single-Use Invite Links** | Group invite links expire after 24 hours and one use |
 | ⏰ **Auto Expiry** | Members removed automatically when subscription ends |
-| 🛡️ **Admin Control** | Confirm or reject payment requests via inline buttons |
-| 📌 **Status Check** | Users can view their active subscription at any time |
+| 📌 **Status Check** | Users can view their active subscription anytime |
 | 🔄 **Renewal Support** | Easy subscription renewal flow |
+| 🛡️ **Webhook Verification** | Every Stripe event is cryptographically verified |
 
 ---
 
@@ -22,10 +25,38 @@
 
 - **Language:** Python 3.11
 - **Bot Framework:** [python-telegram-bot](https://github.com/python-tg/python-telegram-bot) v21
+- **Web Server:** aiohttp (for Stripe webhooks)
 - **Database:** SQLite via `aiosqlite`
-- **Payments:** Stripe (fixed payment links)
+- **Payments:** Stripe API (dynamic checkout sessions + product catalog)
 - **Hosting:** Railway
 - **Scheduler:** APScheduler
+
+---
+
+## 💳 Payment Flow
+
+```
+👤 User presses /start
+        │
+        ▼
+📋 Selects a plan (Monthly $230 · Two-Week $140)
+        │
+        ▼
+🔗 Bot creates a unique Stripe checkout session via API
+   (linked to Stripe product catalog)
+        │
+        ▼
+💳 User pays on Stripe (unique link per user)
+        │
+        ▼
+⚡ Stripe fires webhook → Bot verifies signature
+        │
+        ▼
+🔗 Invite link generated & sent to user automatically
+        │
+        ▼
+⏰ Subscription expires → User removed from group automatically
+```
 
 ---
 
@@ -33,8 +64,8 @@
 
 ### Prerequisites
 - Python 3.11+
-- Telegram Bot token — get one from [@BotFather](https://t.me/BotFather)
-- Stripe account with two payment links created
+- Telegram Bot token — from [@BotFather](https://t.me/BotFather)
+- Stripe account with API access and products created
 - The bot must be **admin** in your Telegram group
 
 ### 1️⃣ Clone & Install
@@ -51,19 +82,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Open `.env` and fill in your values:
-
-```env
-TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_GROUP_ID=-1001234567890
-ADMIN_USER_ID=123456789
-STRIPE_MONTHLY_LINK=https://buy.stripe.com/...
-STRIPE_BIWEEKLY_LINK=https://buy.stripe.com/...
-CURRENCY_CODE=USD
-MONTHLY_PRICE=230
-BIWEEKLY_PRICE=140
-DATABASE_PATH=subscriptions.db
-```
+Edit `.env` with your values (see Environment Variables section below).
 
 ### 3️⃣ Run
 
@@ -75,59 +94,61 @@ python3 bot.py
 
 ## ☁️ Deploy on Railway
 
-1. Push your code to GitHub
-2. Go to [railway.app](https://railway.app) → sign in with GitHub
-3. Click **New Project → Deploy from GitHub Repo** → select your repo
-4. Add a **Volume** → set mount path to `/data`
-5. Go to **Variables** tab and add:
-
-| Variable | Value |
-|----------|-------|
-| `TELEGRAM_BOT_TOKEN` | Bot token from BotFather |
-| `TELEGRAM_GROUP_ID` | Your Telegram group ID |
-| `ADMIN_USER_ID` | Your personal Telegram user ID |
-| `STRIPE_MONTHLY_LINK` | Stripe link for the monthly plan |
-| `STRIPE_BIWEEKLY_LINK` | Stripe link for the two-week plan |
-| `CURRENCY_CODE` | `USD` |
-| `MONTHLY_PRICE` | `230` |
-| `BIWEEKLY_PRICE` | `140` |
-| `DATABASE_PATH` | `/data/subscriptions.db` |
-
-6. Click **Deploy** — Railway auto-builds and starts the bot 🎉
+1. Push code to GitHub
+2. Go to [railway.app](https://railway.app) → **New Project → Deploy from GitHub Repo**
+3. Add a **Volume** → mount path: `/data`
+4. Go to **Settings → Networking → Generate Domain** → set port to `8080`
+5. Add all environment variables under the **Variables** tab
+6. Click **Deploy** 🎉
 
 > Railway auto-redeploys on every GitHub push.
 
 ---
 
-## 🔄 Subscription Flow
+## ⚙️ Environment Variables
 
+| Variable | Description |
+|----------|-------------|
+| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather |
+| `TELEGRAM_GROUP_ID` | Your Telegram group ID (negative number) |
+| `ADMIN_USER_ID` | Your personal Telegram user ID |
+| `TELEGRAM_BOT_USERNAME` | Bot username without @ (e.g. `LoverAxisBot`) |
+| `STRIPE_SECRET_KEY` | Stripe secret API key (`sk_live_...`) |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (`whsec_...`) |
+| `MONTHLY_PRICE` | Monthly price for display (`230`) |
+| `BIWEEKLY_PRICE` | Two-week price for display (`140`) |
+| `CURRENCY_CODE` | Currency code (`USD`) |
+| `PUBLIC_URL` | Your Railway public URL |
+| `DATABASE_PATH` | `/data/subscriptions.db` |
+
+---
+
+## 🔗 Stripe Setup
+
+### 1. Get API Keys
+- Stripe Dashboard → **Developers → API keys**
+- Copy the **Secret key** (`sk_live_...`) → add to Railway as `STRIPE_SECRET_KEY`
+
+### 2. Create Products
+- Stripe Dashboard → **Product catalog → + Add product**
+- Create one product for each plan with the correct price
+- Copy each **Price ID** (`price_...`) from the product page
+
+### 3. Create Webhook
+- Stripe Dashboard → **Developers → Webhooks → Add destination**
+- Select **Your account** → choose latest API version
+- Select event: `checkout.session.completed`
+- Endpoint URL:
 ```
-👤 User presses /start
-        │
-        ▼
-📋 Selects a plan (Monthly $230 · Two-Week $140)
-        │
-        ▼
-💳 Clicks "Pay Now" → redirected to Stripe checkout
-        │
-        ▼
-✅ Completes payment → clicks "I've Paid" in the bot
-        │
-        ▼
-🔔 Admin receives notification with Confirm / Reject buttons
-        │
-        ▼
-🔗 Admin confirms → invite link sent to user automatically
-        │
-        ▼
-⏰ Subscription expires → user removed from group automatically
+https://your-railway-url.up.railway.app/webhook/stripe
 ```
+- After creation, **Reveal** signing secret (`whsec_...`) → add to Railway as `STRIPE_WEBHOOK_SECRET`
 
 ---
 
 ## 🛡️ Bot Permissions Required
 
-The bot **must be an admin** in your Telegram group with the following permissions:
+The bot **must be an admin** in your Telegram group with:
 
 - ✅ Invite users via link
 - ✅ Ban users
@@ -137,7 +158,7 @@ The bot **must be an admin** in your Telegram group with the following permissio
 ## 📁 Project Structure
 
 ```
-├── bot.py              # Main bot logic & handlers
+├── bot.py              # Main bot logic, webhook server & handlers
 ├── config.py           # Environment variable loader
 ├── database.py         # SQLite database layer
 ├── requirements.txt    # Python dependencies
@@ -146,22 +167,6 @@ The bot **must be an admin** in your Telegram group with the following permissio
 ├── .env.example        # Environment variable template
 └── .gitignore          # Git ignore rules
 ```
-
----
-
-## ⚙️ Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `TELEGRAM_BOT_TOKEN` | ✅ | Bot token from @BotFather |
-| `TELEGRAM_GROUP_ID` | ✅ | Target group ID (negative number) |
-| `ADMIN_USER_ID` | ✅ | Your Telegram user ID |
-| `STRIPE_MONTHLY_LINK` | ✅ | Stripe payment link for monthly plan |
-| `STRIPE_BIWEEKLY_LINK` | ✅ | Stripe payment link for two-week plan |
-| `CURRENCY_CODE` | ✅ | Currency code (e.g. `USD`) |
-| `MONTHLY_PRICE` | ✅ | Monthly plan price (display only) |
-| `BIWEEKLY_PRICE` | ✅ | Two-week plan price (display only) |
-| `DATABASE_PATH` | ✅ | Path to SQLite database file |
 
 ---
 
