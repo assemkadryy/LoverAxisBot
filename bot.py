@@ -2,6 +2,8 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
+import stripe
+from aiohttp import web
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
@@ -19,18 +21,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+stripe.api_key = config.STRIPE_SECRET_KEY
+
 PLANS = {
     "monthly": {
         "label": "اشتراك شهري (30 يوم)",
         "price": config.MONTHLY_PRICE,
+        "amount": config.MONTHLY_AMOUNT,
         "days": config.MONTHLY_DAYS,
-        "link": config.STRIPE_MONTHLY_LINK,
     },
     "biweekly": {
         "label": "اشتراك أسبوعين (14 يوم)",
         "price": config.BIWEEKLY_PRICE,
+        "amount": config.BIWEEKLY_AMOUNT,
         "days": config.BIWEEKLY_DAYS,
-        "link": config.STRIPE_BIWEEKLY_LINK,
     },
 }
 
@@ -105,7 +109,7 @@ async def show_plans(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ── Plan selected → send Stripe link ────────────────────────────────
+# ── Plan selected → create Stripe session ───────────────────────────
 async def plan_selected(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -114,92 +118,70 @@ async def plan_selected(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     plan = PLANS[plan_key]
     user = update.effective_user
 
+    await query.edit_message_text("⏳ جاري إنشاء رابط الدفع...")
+
+    try:
+        session = stripe.checkout.Session.create(
+            line_items=[{
+                "price_data": {
+                    "currency": config.CURRENCY_CODE.lower(),
+                    "unit_amount": plan["amount"],
+                    "product_data": {"name": plan["label"]},
+                },
+                "quantity": 1,
+            }],
+            mode="payment",
+            client_reference_id=str(user.id),
+            metadata={"plan": plan_key},
+            success_url=(
+                f"{config.PUBLIC_URL}/payment/success"
+                f"?bot={config.TELEGRAM_BOT_USERNAME}"
+            ),
+            cancel_url=(
+                f"{config.PUBLIC_URL}/payment/cancel"
+                f"?bot={config.TELEGRAM_BOT_USERNAME}"
+            ),
+            expires_at=int(
+                (datetime.now(timezone.utc) + timedelta(hours=1)).timestamp()
+            ),
+        )
+    except Exception as e:
+        logger.error("Stripe session error: %s", e)
+        await query.edit_message_text(
+            "❌ فشل إنشاء رابط الدفع. حاول مرة أخرى لاحقاً."
+        )
+        return
+
     await db.create_subscription(
         user_id=user.id,
         username=user.username or user.full_name,
         plan=plan_key,
         price=plan["price"],
         currency=config.CURRENCY_CODE,
+        stripe_session_id=session.id,
     )
-
-    keyboard = [
-        [InlineKeyboardButton("💳 ادفع الآن", url=plan["link"])],
-        [InlineKeyboardButton(
-            "✅ دفعت – أرسل طلب التفعيل",
-            callback_data=f"paid_{plan_key}_{user.id}",
-        )],
-    ]
 
     await query.edit_message_text(
         f"*{plan['label']}*\n"
         f"المبلغ: *{plan['price']} {config.CURRENCY_CODE}*\n\n"
-        "اضغط على زر الدفع وأكمل العملية عبر Stripe.\n"
-        "بعد إتمام الدفع اضغط \"دفعت\" لإرسال طلب التفعيل.",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        "اضغط الزر أدناه للدفع.\n"
+        "سيصلك رابط الدخول تلقائياً بعد إتمام الدفع ✅\n\n"
+        "⏰ الرابط صالح لمدة ساعة واحدة.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("💳 ادفع الآن", url=session.url)],
+        ]),
         parse_mode="Markdown",
     )
 
 
-# ── User claims payment → notify admin ──────────────────────────────
-async def payment_claimed(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    parts = query.data.split("_")
-    plan_key = parts[1]
-    user = query.from_user
-    plan = PLANS[plan_key]
-
-    await query.edit_message_text(
-        "⏳ تم إرسال طلبك!\n"
-        "سيتم مراجعة الدفع وتفعيل اشتراكك خلال دقائق."
-    )
-
-    keyboard = [
-        [InlineKeyboardButton(
-            "✅ تأكيد وتفعيل الاشتراك",
-            callback_data=f"confirm_{user.id}_{plan_key}",
-        )],
-        [InlineKeyboardButton(
-            "❌ رفض",
-            callback_data=f"reject_{user.id}",
-        )],
-    ]
-
-    await ctx.bot.send_message(
-        chat_id=config.ADMIN_USER_ID,
-        text=(
-            f"🔔 طلب تفعيل اشتراك جديد!\n\n"
-            f"المستخدم: @{user.username or user.full_name}\n"
-            f"ID: `{user.id}`\n"
-            f"الباقة: {plan['label']}\n"
-            f"المبلغ: {plan['price']} {config.CURRENCY_CODE}\n\n"
-            "هل تم الدفع؟"
-        ),
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown",
-    )
-
-
-# ── Admin confirms → activate + send invite link ─────────────────────
-async def admin_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-
-    if query.from_user.id != config.ADMIN_USER_ID:
-        await query.answer("❌ غير مصرح لك.", show_alert=True)
-        return
-
-    await query.answer()
-
-    parts = query.data.split("_", 2)
-    user_id = int(parts[1])
-    plan_key = parts[2]
+# ── Activate subscription and notify user ───────────────────────────
+async def activate_and_notify(bot, user_id: int, plan_key: str):
     plan = PLANS[plan_key]
     now = datetime.now(timezone.utc)
     end = now + timedelta(days=plan["days"])
 
     try:
-        invite = await ctx.bot.create_chat_invite_link(
+        invite = await bot.create_chat_invite_link(
             chat_id=config.TELEGRAM_GROUP_ID,
             member_limit=1,
             expire_date=int((now + timedelta(hours=24)).timestamp()),
@@ -207,8 +189,7 @@ async def admin_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         invite_url = invite.invite_link
     except Exception as e:
-        logger.error("Failed to create invite link: %s", e)
-        await query.edit_message_text("❌ فشل إنشاء رابط الدخول. حاول مرة أخرى.")
+        logger.error("Failed to create invite link for %s: %s", user_id, e)
         return
 
     await db.activate_subscription_by_user(
@@ -219,13 +200,7 @@ async def admin_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         invite_link=invite_url,
     )
 
-    await query.edit_message_text(
-        f"✅ تم تفعيل اشتراك المستخدم {user_id}\n"
-        f"الباقة: {plan['label']}\n"
-        f"ينتهي: {end.strftime('%Y-%m-%d %H:%M UTC')}"
-    )
-
-    await ctx.bot.send_message(
+    await bot.send_message(
         chat_id=user_id,
         text=(
             f"✅ تم تأكيد دفعك وتفعيل اشتراكك!\n\n"
@@ -236,29 +211,84 @@ async def admin_confirm(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         ),
     )
 
+    try:
+        await bot.send_message(
+            chat_id=config.ADMIN_USER_ID,
+            text=(
+                f"💰 اشتراك جديد!\n"
+                f"المستخدم ID: {user_id}\n"
+                f"الباقة: {plan['label']}\n"
+                f"ينتهي: {end.strftime('%Y-%m-%d %H:%M UTC')}"
+            ),
+        )
+    except Exception:
+        pass
 
-# ── Admin rejects ────────────────────────────────────────────────────
-async def admin_reject(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
 
-    if query.from_user.id != config.ADMIN_USER_ID:
-        await query.answer("❌ غير مصرح لك.", show_alert=True)
-        return
+# ── Stripe webhook handler ───────────────────────────────────────────
+def make_webhook_handler(bot):
+    async def handle_stripe_webhook(request: web.Request) -> web.Response:
+        payload = await request.read()
+        sig = request.headers.get("Stripe-Signature", "")
 
-    await query.answer()
+        try:
+            event = stripe.Webhook.construct_event(
+                payload, sig, config.STRIPE_WEBHOOK_SECRET
+            )
+        except stripe.error.SignatureVerificationError:
+            logger.warning("Invalid Stripe webhook signature")
+            return web.Response(status=400, text="Invalid signature")
+        except Exception as e:
+            logger.error("Webhook parse error: %s", e)
+            return web.Response(status=400)
 
-    user_id = int(query.data.split("_")[1])
+        if event["type"] == "checkout.session.completed":
+            session = event["data"]["object"]
+            user_id = int(session.get("client_reference_id", 0))
+            plan_key = session.get("metadata", {}).get("plan")
+            session_id = session.get("id")
 
-    await query.edit_message_text(f"❌ تم رفض طلب المستخدم {user_id}.")
+            if not user_id or not plan_key:
+                logger.warning("Missing user_id or plan in webhook: %s", session_id)
+                return web.Response(status=200)
 
-    await ctx.bot.send_message(
-        chat_id=user_id,
-        text=(
-            "❌ لم يتم التحقق من دفعك.\n"
-            "تأكد من إتمام عملية الدفع وأرسل طلبك مرة أخرى.\n"
-            "اضغط /start للمحاولة مرة أخرى."
-        ),
-    )
+            # Verify session exists in our DB
+            sub = await db.get_pending_by_session(session_id)
+            if not sub:
+                logger.warning("No pending subscription for session: %s", session_id)
+                return web.Response(status=200)
+
+            await activate_and_notify(bot, user_id, plan_key)
+            logger.info("Activated subscription for user %s plan %s", user_id, plan_key)
+
+        return web.Response(status=200, text="OK")
+
+    return handle_stripe_webhook
+
+
+# ── Success / Cancel pages ───────────────────────────────────────────
+async def payment_success(request: web.Request) -> web.Response:
+    bot_username = request.rel_url.query.get("bot", "")
+    html = f"""
+    <html><body style="font-family:sans-serif;text-align:center;padding:60px">
+    <h2>✅ تم الدفع بنجاح!</h2>
+    <p>سيصلك رابط الدخول على تيليجرام خلال لحظات.</p>
+    {"<br><a href='https://t.me/" + bot_username + "'>العودة للبوت</a>" if bot_username else ""}
+    </body></html>
+    """
+    return web.Response(text=html, content_type="text/html")
+
+
+async def payment_cancel(request: web.Request) -> web.Response:
+    bot_username = request.rel_url.query.get("bot", "")
+    html = f"""
+    <html><body style="font-family:sans-serif;text-align:center;padding:60px">
+    <h2>❌ تم إلغاء الدفع</h2>
+    <p>يمكنك المحاولة مرة أخرى من البوت.</p>
+    {"<br><a href='https://t.me/" + bot_username + "'>العودة للبوت</a>" if bot_username else ""}
+    </body></html>
+    """
+    return web.Response(text=html, content_type="text/html")
 
 
 # ── Scheduled job: remove expired members ───────────────────────────
@@ -295,24 +325,43 @@ async def remove_expired_members(ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # ── Main ─────────────────────────────────────────────────────────────
-def main():
-    asyncio.get_event_loop().run_until_complete(db.init_db())
+async def main_async():
+    await db.init_db()
 
     app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(show_plans,          pattern=r"^renew$"))
     app.add_handler(CallbackQueryHandler(plan_selected,       pattern=r"^plan_"))
-    app.add_handler(CallbackQueryHandler(payment_claimed,     pattern=r"^paid_"))
-    app.add_handler(CallbackQueryHandler(admin_confirm,       pattern=r"^confirm_"))
-    app.add_handler(CallbackQueryHandler(admin_reject,        pattern=r"^reject_"))
     app.add_handler(CallbackQueryHandler(subscription_status, pattern=r"^status$"))
 
-    job_queue = app.job_queue
-    job_queue.run_repeating(remove_expired_members, interval=3600, first=10)
+    app.job_queue.run_repeating(remove_expired_members, interval=3600, first=10)
 
-    logger.info("Bot started!")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    # aiohttp web server
+    web_app = web.Application()
+    web_app.router.add_post("/webhook/stripe", make_webhook_handler(app.bot))
+    web_app.router.add_get("/payment/success", payment_success)
+    web_app.router.add_get("/payment/cancel", payment_cancel)
+    web_app.router.add_get("/health", lambda r: web.Response(text="OK"))
+
+    runner = web.AppRunner(web_app)
+    await runner.setup()
+    await web.TCPSite(runner, "0.0.0.0", config.PORT).start()
+    logger.info("Webhook server on port %s", config.PORT)
+
+    async with app:
+        await app.start()
+        await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        logger.info("Bot started!")
+        await asyncio.Event().wait()
+        await app.updater.stop()
+        await app.stop()
+
+    await runner.cleanup()
+
+
+def main():
+    asyncio.run(main_async())
 
 
 if __name__ == "__main__":
