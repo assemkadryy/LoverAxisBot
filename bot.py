@@ -39,6 +39,7 @@ PLANS = {
     "test": {
         "label": "اشتراك تجريبي (3 دقائق)",
         "price": 1,
+        "currency": "AED",
         "price_id": config.STRIPE_TEST_PRICE_ID,
         "days": None,
         "minutes": 3,
@@ -69,7 +70,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if config.STRIPE_TEST_PRICE_ID:
         keyboard.insert(2, [InlineKeyboardButton(
-            "🧪 اشتراك تجريبي – 1 USD (3 دقائق)",
+            "🧪 اشتراك تجريبي – 1 AED (3 دقائق)",
             callback_data="plan_test",
         )])
 
@@ -170,9 +171,10 @@ async def plan_selected(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         stripe_session_id=session.id,
     )
 
+    display_currency = plan.get("currency", config.CURRENCY_CODE)
     await query.edit_message_text(
         f"*{plan['label']}*\n"
-        f"المبلغ: *{plan['price']} {config.CURRENCY_CODE}*\n\n"
+        f"المبلغ: *{plan['price']} {display_currency}*\n\n"
         "اضغط الزر أدناه للدفع.\n"
         "سيصلك رابط الدخول تلقائياً بعد إتمام الدفع ✅\n\n"
         "⏰ الرابط صالح لمدة ساعة واحدة.",
