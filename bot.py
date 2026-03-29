@@ -27,13 +27,13 @@ PLANS = {
     "monthly": {
         "label": "اشتراك شهري (30 يوم)",
         "price": config.MONTHLY_PRICE,
-        "amount": config.MONTHLY_AMOUNT,
+        "price_id": config.STRIPE_MONTHLY_PRICE_ID,
         "days": config.MONTHLY_DAYS,
     },
     "biweekly": {
         "label": "اشتراك أسبوعين (14 يوم)",
         "price": config.BIWEEKLY_PRICE,
-        "amount": config.BIWEEKLY_AMOUNT,
+        "price_id": config.STRIPE_BIWEEKLY_PRICE_ID,
         "days": config.BIWEEKLY_DAYS,
     },
 }
@@ -123,11 +123,7 @@ async def plan_selected(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     try:
         session = stripe.checkout.Session.create(
             line_items=[{
-                "price_data": {
-                    "currency": config.CURRENCY_CODE.lower(),
-                    "unit_amount": plan["amount"],
-                    "product_data": {"name": plan["label"]},
-                },
+                "price": plan["price_id"],
                 "quantity": 1,
             }],
             mode="payment",
