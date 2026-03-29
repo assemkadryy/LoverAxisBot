@@ -1,44 +1,44 @@
-# بوت الاشتراكات - Telegram Subscription Bot
+# Telegram Subscription Bot
 
-بوت تيليجرام لإدارة اشتراكات المجموعة المميزة مع بوابة دفع Stripe.
-
----
-
-## المميزات
-
-- اشتراك شهري (30 يوم) واشتراك أسبوعين (14 يوم)
-- دفع آمن عبر Stripe
-- إرسال رابط دخول المجموعة تلقائياً بعد تأكيد الدفع
-- إزالة الأعضاء تلقائياً عند انتهاء الاشتراك
-- لوحة تحكم للمشرف لتأكيد أو رفض طلبات الاشتراك
-- عرض حالة الاشتراك للمستخدم
+A Telegram bot for managing premium group subscriptions with Stripe payment integration.
 
 ---
 
-## المتطلبات
+## Features
+
+- Monthly (30 days) and two-week (14 days) subscription plans
+- Secure payment via Stripe fixed payment links
+- Automatically sends group invite link after admin confirms payment
+- Automatically removes members when subscription expires
+- Admin panel to confirm or reject subscription requests
+- Users can check their subscription status anytime
+
+---
+
+## Requirements
 
 - Python 3.11+
-- حساب Telegram Bot (من @BotFather)
-- حساب Stripe
-- حساب Railway (للنشر)
+- Telegram Bot token (from @BotFather)
+- Stripe account with payment links
+- Railway account (for deployment)
 
 ---
 
-## الإعداد المحلي
+## Local Setup
 
-### 1. تثبيت المتطلبات
+### 1. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. إعداد ملف البيئة
+### 2. Configure environment variables
 
 ```bash
 cp .env.example .env
 ```
 
-ثم عدّل ملف `.env` بالقيم الخاصة بك:
+Edit `.env` with your values:
 
 ```env
 TELEGRAM_BOT_TOKEN=your_bot_token
@@ -52,7 +52,7 @@ BIWEEKLY_PRICE=140
 DATABASE_PATH=subscriptions.db
 ```
 
-### 3. تشغيل البوت
+### 3. Run the bot
 
 ```bash
 python3 bot.py
@@ -60,65 +60,65 @@ python3 bot.py
 
 ---
 
-## النشر على Railway
+## Deploy on Railway
 
-1. ارفع الملفات على GitHub
-2. اذهب إلى [railway.app](https://railway.app) وسجّل دخولك بحساب GitHub
-3. اختر **New Project → Deploy from GitHub Repo**
-4. أضف **Volume** بمسار `/data`
-5. أضف متغيرات البيئة في تبويب **Variables**:
+1. Push files to GitHub
+2. Go to [railway.app](https://railway.app) and sign in with GitHub
+3. Click **New Project → Deploy from GitHub Repo**
+4. Add a **Volume** with mount path `/data`
+5. Add environment variables under the **Variables** tab:
 
-| المتغير | القيمة |
-|---------|--------|
-| `TELEGRAM_BOT_TOKEN` | توكن البوت من BotFather |
-| `TELEGRAM_GROUP_ID` | ID المجموعة |
-| `ADMIN_USER_ID` | ID حسابك على تيليجرام |
-| `STRIPE_MONTHLY_LINK` | رابط Stripe للاشتراك الشهري |
-| `STRIPE_BIWEEKLY_LINK` | رابط Stripe لاشتراك الأسبوعين |
+| Variable | Value |
+|----------|-------|
+| `TELEGRAM_BOT_TOKEN` | Bot token from BotFather |
+| `TELEGRAM_GROUP_ID` | Your group ID |
+| `ADMIN_USER_ID` | Your Telegram user ID |
+| `STRIPE_MONTHLY_LINK` | Stripe link for monthly plan |
+| `STRIPE_BIWEEKLY_LINK` | Stripe link for two-week plan |
 | `CURRENCY_CODE` | `USD` |
 | `MONTHLY_PRICE` | `230` |
 | `BIWEEKLY_PRICE` | `140` |
 | `DATABASE_PATH` | `/data/subscriptions.db` |
 
-6. اضغط **Deploy**
+6. Click **Deploy**
 
 ---
 
-## كيفية عمل البوت
+## How It Works
 
 ```
-المستخدم يضغط /start
+User presses /start
         ↓
-يختار الباقة (شهري أو أسبوعين)
+Selects a plan (monthly or two-week)
         ↓
-يضغط "ادفع الآن" → ينتقل إلى صفحة Stripe
+Clicks "Pay Now" → redirected to Stripe payment page
         ↓
-يكمل الدفع ويضغط "دفعت"
+Completes payment → clicks "I've Paid"
         ↓
-يصل إشعار للمشرف مع زر تأكيد أو رفض
+Admin receives a notification with Confirm / Reject buttons
         ↓
-المشرف يضغط تأكيد → يصل رابط الدخول للمستخدم تلقائياً
+Admin clicks Confirm → invite link sent to user automatically
         ↓
-عند انتهاء الاشتراك → يتم إزالة العضو تلقائياً
+When subscription expires → user is removed from the group automatically
 ```
 
 ---
 
-## صلاحيات البوت في المجموعة
+## Bot Permissions in the Group
 
-يجب أن يكون البوت مشرفاً في المجموعة مع تفعيل:
-- **دعوة المستخدمين عبر روابط**
-- **حظر المستخدمين**
+The bot must be an admin in the group with these permissions enabled:
+- **Invite users via link**
+- **Ban users**
 
 ---
 
-## الملفات
+## File Structure
 
-| الملف | الوظيفة |
-|-------|---------|
-| `bot.py` | الكود الرئيسي للبوت |
-| `config.py` | إعدادات متغيرات البيئة |
-| `database.py` | قاعدة بيانات SQLite |
-| `requirements.txt` | مكتبات Python |
-| `Procfile` | أمر تشغيل Railway |
-| `runtime.txt` | إصدار Python |
+| File | Purpose |
+|------|---------|
+| `bot.py` | Main bot logic |
+| `config.py` | Environment variable loader |
+| `database.py` | SQLite database layer |
+| `requirements.txt` | Python dependencies |
+| `Procfile` | Railway start command |
+| `runtime.txt` | Python version |
