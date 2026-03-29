@@ -18,7 +18,7 @@ STRIPE_BIWEEKLY_LINK = os.getenv(
 )
 
 CURRENCY_CODE = os.getenv("CURRENCY_CODE", "USD")
-MONTHLY_PRICE = int(os.getenv("MONTHLY_PRICE", "200"))
+MONTHLY_PRICE = int(os.getenv("MONTHLY_PRICE", "230"))
 BIWEEKLY_PRICE = int(os.getenv("BIWEEKLY_PRICE", "140"))
 
 # Subscription durations in days
