@@ -36,14 +36,6 @@ PLANS = {
         "price_id": config.STRIPE_BIWEEKLY_PRICE_ID,
         "days": config.BIWEEKLY_DAYS,
     },
-    "test": {
-        "label": "اشتراك تجريبي (3 دقائق)",
-        "price": 1,
-        "currency": "AED",
-        "price_id": config.STRIPE_TEST_PRICE_ID,
-        "days": None,
-        "minutes": 3,
-    },
 }
 
 
@@ -67,12 +59,6 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             callback_data="status",
         )],
     ]
-
-    if config.STRIPE_TEST_PRICE_ID:
-        keyboard.insert(2, [InlineKeyboardButton(
-            "🧪 اشتراك تجريبي – 1 AED (3 دقائق)",
-            callback_data="plan_test",
-        )])
 
     await update.message.reply_text(
         "من فضلك اختر أحد الخيارات التالية للإشتراك 👇",
@@ -171,10 +157,9 @@ async def plan_selected(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         stripe_session_id=session.id,
     )
 
-    display_currency = plan.get("currency", config.CURRENCY_CODE)
     await query.edit_message_text(
         f"*{plan['label']}*\n"
-        f"المبلغ: *{plan['price']} {display_currency}*\n\n"
+        f"المبلغ: *{plan['price']} {config.CURRENCY_CODE}*\n\n"
         "اضغط الزر أدناه للدفع.\n"
         "سيصلك رابط الدخول تلقائياً بعد إتمام الدفع ✅\n\n"
         "⏰ الرابط صالح لمدة ساعة واحدة.",
@@ -189,10 +174,7 @@ async def plan_selected(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def activate_and_notify(bot, user_id: int, plan_key: str):
     plan = PLANS[plan_key]
     now = datetime.now(timezone.utc)
-    if plan.get("minutes"):
-        end = now + timedelta(minutes=plan["minutes"])
-    else:
-        end = now + timedelta(days=plan["days"])
+    end = now + timedelta(days=plan["days"])
 
     try:
         invite = await bot.create_chat_invite_link(
@@ -349,7 +331,7 @@ async def main_async():
     app.add_handler(CallbackQueryHandler(plan_selected,       pattern=r"^plan_"))
     app.add_handler(CallbackQueryHandler(subscription_status, pattern=r"^status$"))
 
-    app.job_queue.run_repeating(remove_expired_members, interval=60, first=10)
+    app.job_queue.run_repeating(remove_expired_members, interval=3600, first=10)
 
     # aiohttp web server
     web_app = web.Application()
